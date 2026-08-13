@@ -1,0 +1,32 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ecomm-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+    networks:
+      - ecomm-net
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ecomm-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+    ports:
+      - "0.0.0.0:8080:8000"
+    depends_on:
+      - qdrant
+    networks:
+      - ecomm-net
+
+networks:
+  ecomm-net:
+    driver: bridge

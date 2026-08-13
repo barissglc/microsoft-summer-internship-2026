@@ -1,0 +1,15 @@
+.env
+.env.*
+__pycache__/
+*.pyc
+.venv/
+venv/
+qdrant_storage/
+*.log
+.DS_Store
+ingestion_checkpoint.json
+node_modules/
+dist/
+build/
+.claude/
+.playwright-mcp/
