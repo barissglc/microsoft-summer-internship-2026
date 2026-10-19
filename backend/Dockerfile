@@ -1,21 +1,14 @@
-FROM node:20-slim AS frontend-build
-WORKDIR /frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm install
-COPY frontend ./
-RUN npm run build
-
+# Sadece API. Arayüz (frontend/dist) sunucuda Nginx tarafından doğrudan sunulur.
 FROM python:3.12-slim
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    MALLOC_ARENA_MAX=2
 
 WORKDIR /app
-
-COPY backend/pyproject.toml ./
-RUN uv sync --no-install-project
-
 COPY backend/app ./app
-COPY --from=frontend-build /frontend/dist ./static
 
+USER nobody
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "app.main"]

@@ -1,0 +1,13 @@
+.git
+.env
+.claude
+.playwright-mcp
+.venv
+node_modules
+frontend/node_modules
+frontend/dist
+qdrant_storage
+ingestion_checkpoint.json
+*.log
+docs/*.png
+live-footer.png

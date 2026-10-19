@@ -55,7 +55,7 @@ decision, and [`docs/glossary.md`](docs/glossary.md) for term definitions.
 ## Project layout
 
 ```
-backend/          FastAPI app (backend/app/main.py, backend/app/rag.py)
+backend/          Dependency-free API (backend/app/main.py, backend/app/rag.py)
 frontend/          React chat UI
 scripts/
   ingest.py         One-time batch job: embed the dataset and load it into Qdrant
@@ -63,7 +63,7 @@ scripts/
 docs/
   adr/              Architecture Decision Records
   glossary.md        Project terminology
-docker-compose.yml  Qdrant + backend, one command deploy
+docker-compose.yml  Qdrant + backend API (Nginx serves frontend/dist)
 ```
 
 ## Running locally
@@ -84,9 +84,9 @@ Requires [`uv`](https://docs.astral.sh/uv/) and Node.js 20+.
    ```bash
    uv run python scripts/ingest.py
    ```
-4. **Run the backend**:
+4. **Run the backend** (standard library only, no install step):
    ```bash
-   cd backend && uv sync && uv run uvicorn app.main:app --reload --port 8001
+   cd backend && set -a && . ./.env && set +a && PORT=8001 python3 -m app.main
    ```
 5. **Run the frontend**:
    ```bash
@@ -100,9 +100,12 @@ docker compose build backend
 docker compose up -d
 ```
 
-This builds the frontend and backend into a single image (see
-`backend/Dockerfile`) and serves everything from FastAPI on port 8000
-(mapped to 8080 in `docker-compose.yml`).
+The backend image (see `backend/Dockerfile`) only contains the API and talks
+to Voyage, Qdrant and Gemini over plain HTTP, so it has no third-party
+dependencies and idles at ~15 MB. It listens on `127.0.0.1:3030`; Qdrant is
+not published. Build the UI with `cd frontend && npm run build` and let the
+host Nginx serve `frontend/dist` as static files, proxying `/api/` to the
+backend.
 
 ## Design decisions worth knowing about
 

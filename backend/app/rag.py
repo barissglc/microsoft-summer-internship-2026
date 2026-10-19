@@ -1,21 +1,21 @@
+import json
 import os
-
-import voyageai
-from google import genai
-from google.genai import types
-from qdrant_client import QdrantClient
+import urllib.error
+import urllib.request
 
 EMBED_MODEL = "voyage-4-large"
 GEN_MODEL = "gemini-flash-lite-latest"
 OUTPUT_DIM = 1024
 COLLECTION = "support_qa"
 TOP_K = 5
+TIMEOUT = 30
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
-
-_gemini = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-_voyage = voyageai.Client(api_key=os.environ["VOYAGE_API_KEY"])
-_qdrant = QdrantClient(url=QDRANT_URL)
+VOYAGE_URL = "https://api.voyageai.com/v1/embeddings"
+GEMINI_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    f"{GEN_MODEL}:generateContent"
+)
 
 SYSTEM_INSTRUCTION = """\
 Sen bir e-ticaret sitesinin müşteri destek asistanısın. Kısa ve net
@@ -46,22 +46,41 @@ Kurallar:
 """
 
 
-def embed_query(text: str):
-    resp = _voyage.embed(
-        [text],
-        model=EMBED_MODEL,
-        input_type="query",
-        output_dimension=OUTPUT_DIM,
+def _post_json(url, body, headers=None):
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", **(headers or {})},
     )
-    return resp.embeddings[0]
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        return json.load(resp)
+
+
+def embed_query(text: str):
+    resp = _post_json(
+        VOYAGE_URL,
+        {
+            "input": [text],
+            "model": EMBED_MODEL,
+            "input_type": "query",
+            "output_dimension": OUTPUT_DIM,
+        },
+        {"Authorization": f"Bearer {os.environ['VOYAGE_API_KEY']}"},
+    )
+    return resp["data"][0]["embedding"]
 
 
 def search_similar(vector):
-    if not _qdrant.collection_exists(COLLECTION):
-        return []
-    return _qdrant.query_points(
-        collection_name=COLLECTION, query=vector, limit=TOP_K
-    ).points
+    try:
+        resp = _post_json(
+            f"{QDRANT_URL}/collections/{COLLECTION}/points/query",
+            {"query": vector, "limit": TOP_K, "with_payload": True},
+        )
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return []
+        raise
+    return resp["result"]["points"]
 
 
 def build_context_block(hits):
@@ -69,9 +88,9 @@ def build_context_block(hits):
         return "(No matching records found.)"
     lines = []
     for h in hits:
-        p = h.payload
+        p = h["payload"]
         lines.append(
-            f"[benzerlik: {h.score:.2f}] [{p['category']}/{p['intent']}]\n"
+            f"[benzerlik: {h['score']:.2f}] [{p['category']}/{p['intent']}]\n"
             f"Soru: {p['instruction']}\n"
             f"Cevap: {p['response']}"
         )
@@ -81,7 +100,7 @@ def build_context_block(hits):
 def build_meta(hits):
     if not hits:
         return "no matching records"
-    best = max(h.score for h in hits)
+    best = max(h["score"] for h in hits)
     return f"source: {len(hits)} similar records · top match: {best:.2f}"
 
 
@@ -94,17 +113,13 @@ def build_contents(history, current_message, context_block):
         role = ROLE_MAP.get(turn["role"])
         if role is None:
             continue
-        contents.append(
-            types.Content(role=role, parts=[types.Part.from_text(text=turn["text"])])
-        )
+        contents.append({"role": role, "parts": [{"text": turn["text"]}]})
 
     augmented = (
         f"Kullanıcının sorusu: {current_message}\n\n"
         f"Benzer geçmiş destek kayıtları:\n{context_block}"
     )
-    contents.append(
-        types.Content(role="user", parts=[types.Part.from_text(text=augmented)])
-    )
+    contents.append({"role": "user", "parts": [{"text": augmented}]})
     return contents
 
 
@@ -114,12 +129,17 @@ def answer(message: str, history: list[dict]):
     context_block = build_context_block(hits)
     contents = build_contents(history, message, context_block)
 
-    resp = _gemini.models.generate_content(
-        model=GEN_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.3,
-        ),
+    resp = _post_json(
+        GEMINI_URL,
+        {
+            "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+            "contents": contents,
+            "generationConfig": {"temperature": 0.3},
+        },
+        {"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
     )
-    return resp.text, build_meta(hits)
+    parts = resp["candidates"][0]["content"]["parts"]
+    text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+    if not text:
+        raise ValueError("Gemini boş yanıt döndü")
+    return text, build_meta(hits)

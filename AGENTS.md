@@ -31,7 +31,7 @@ Qdrant vector DB, Voyage AI embeddings, Gemini generation.
 ## Testing a change
 
 ```bash
-cd backend && uv run uvicorn app.main:app --reload --port 8001
+cd backend && set -a && . ./.env && set +a && PORT=8001 python3 -m app.main
 cd frontend && npm run dev
 ```
 

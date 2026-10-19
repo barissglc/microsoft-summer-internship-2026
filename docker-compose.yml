@@ -1,16 +1,28 @@
+# Sunucuda Nginx frontend/dist'i doğrudan sunar ve /api/ isteklerini backend'e geçirir.
+# Qdrant dışarı açılmaz; backend'e sadece iç ağdan ulaşır.
+name: microsoft
+
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.19.0
     container_name: ecomm-qdrant
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:6333:6333"
+    environment:
+      - QDRANT__TELEMETRY_DISABLED=true
+      - QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS=1
+      - QDRANT__STORAGE__PERFORMANCE__OPTIMIZER_CPU_BUDGET=1
     volumes:
       - ./qdrant_storage:/qdrant/storage
     networks:
       - ecomm-net
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
 
   backend:
+    image: microsoft-backend:latest
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -21,11 +33,14 @@ services:
     environment:
       - QDRANT_URL=http://qdrant:6333
     ports:
-      - "0.0.0.0:8080:8000"
+      - "127.0.0.1:${APP_PORT:-3030}:8000"
     depends_on:
       - qdrant
+    security_opt:
+      - no-new-privileges:true
     networks:
       - ecomm-net
+    logging: *logging
 
 networks:
   ecomm-net:
